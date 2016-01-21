@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <!-- HTML5 -->
+  <meta charset="utf-8">
+  <!-- Bootstrap mobile-first rendering -->
+  <meta name="viewpoint" content="width=device-width, initial-scale=1">
+
+  <title> Socket Canvas </title>
+  
+  <!-- Latest compiled and minified CSS -->
+  <link rel="stylesheet" href="http://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css">
+  <!-- CSS -->
+  <style type="text/css">
+    body {
+    background: url('https://snap-photos.s3.amazonaws.com/img-thumbs/960w/LNKP9XVTMP.jpg') no-repeat center center fixed;
+    background-size: cover;
+    padding: 100px;
+  }
+  
+  .sharedcanvas {
+    border: 5px inset;
+    background-color: white;
+    cursor: pointer;
+  }
+  
+  .sharedcanvas:hover {
+    border-style: outset;
+  }
+  
+  .panel {
+    padding: 5px;
+  }
+  
+  
+  #white {
+    background-color: white;
+  }
+  
+  #blue {
+    background-color: blue;
+  }
+  
+  #red {
+    background-color: red;
+  }
+  
+  #orange {
+    background-color: orange;
+  }
+  
+  #black {
+    background-color: black;
+  }
+  
+  #yellow {
+    background-color: yellow;
+  }
+  
+  #green {
+    background-color: green;
+  }
+  
+  button.colorblock {
+    height: 15px;
+    width: 15px;
+    border-radius: 5px;
+  }
+  
+  button.colorblock:hover {
+    border: black 5px;
+  }
+
+  </style>
+
+</head>
+<body>
+
+<!-- Entire Container -->
+<div class="container">
+  <!-- Color - Eraser Row -->
+  <div class="row">
+    <!-- Color Panel Container -->
+    <div class="container col-sm-2">
+      <!-- Color Panel -->
+      <div class="panel panel-default">
+        <div id="label" class="text-center" style="p">Choose Color:</div>
+        <!-- Color container -->
+        <div class="row container-fluid">
+          <button class="colorblock" id="green"></button>
+          <button class="colorblock" id="blue"></button>
+          <button class="colorblock" id="red"></button>
+          <button class="colorblock" id="yellow"></button>
+          <button class="colorblock" id="orange"></button>
+          <button class="colorblock" id="black"></button>
+          <button class="colorblock" id="initColor"></button>
+        </div>
+        <!-- Color container -->
+      </div>
+      <!-- Color Panel -->
+    </div>
+    <!-- Color Panel Container -->
+    <!-- Eraser -->
+    <div class="container col-sm-2">
+      <div class="panel panel-default">
+        <div div="label" style="p">Eraser</div>
+        <button class="colorblock" id="white"></button>
+        <img id="canvasimg" class="img-responsive">
+      </div>
+    </div>
+    <!-- Eraser -->
+  </div>
+  <!-- Color - Eraser Row -->
+  <!-- Canvas Row -->
+  <div class="row">
+    <div class="container-fluid">
+      <canvas class="sharedcanvas" id="canvas" width="400" height="450"></canvas>
+    </div>
+  </div>
+  <!-- Canvas Row -->
+  <!-- Save-Clear Row -->
+  <div class="row">
+    <input type="button" value="clear" id="clr" size="23" style="">
+  </div>
+  <!-- Save-Clear Row -->
+</div>
+
+  <!-- jQuery Lib -->
+  <script src="https://code.jquery.com/jquery-1.10.2.min.js"></script>
+  <!-- Socket -->
+  <script type="text/javascript" src="http://clicktime.herokuapp.com/socket.io/socket.io.js"></script>
+  <!-- JS -->
+  <script type="text/javascript">
+  var canvas, context, currUsers, socket, username,
+    xLog, yLog, isDragging, colorLog, widthLog, currColor,
+    lastOut = true,
+    haveConnected = false,
+    dot_flag = false,
+    isDrag = false,
+    prevX = 0,
+    currX = 0,
+    prevY = 0,
+    currY = 0,
+    paint = false,
+    base = 'http://clicktime.herokuapp.com:80/rooms/',
+    roomName = 'my-awesome-room';
+
+  var initialColor = '#' + Math.random().toString(16).substr(-6);
+  var currWidth = 2;
+
+  $(document).ready(function() {
+    // initialize canvas elements
+    canvas = document.getElementById("canvas");
+    context = canvas.getContext("2d");
+    clearButton = document.getElementById("clr");
+    currColor = initialColor;
+    $('#initColor').css("background-color", initialColor);
+
+    // color block
+    green = document.getElementById('green');
+    blue = document.getElementById('blue');
+    red = document.getElementById('red');
+    yellow = document.getElementById('yellow');
+    orange = document.getElementById('orange');
+    red = document.getElementById('red');
+    white = document.getElementById('white');
+    initColor = document.getElementById('initColor');
+
+    // initialize movement registers
+    currUsers = new Array();
+
+    // keep track of current canvas drawings to send to new people when they enter
+    xLog = new Array();
+    yLog = new Array();
+    colorLog = new Array();
+    widthLog = new Array();
+    isDragging = new Array();
+
+    // when the mouse moves out of the canvas area, update border and call findxy
+    canvas.addEventListener('mouseleave', function(e) {
+      $('.sharedcanvas').css("border-style", "inset");
+      findxy('out', e);
+    }, false);
+    // when the mouse enters the canvas area, update the border
+    canvas.addEventListener('mouseenter', function(e) {
+      $('.sharedcanvas').css("border-style", "outset");
+      findxy('over', e);
+    }, false);
+    // when the mouse is down, call findxy
+    canvas.addEventListener('mousedown', function(e) {
+      findxy('down', e);
+    }, false);
+    // when the mouse is up, call findxy
+    canvas.addEventListener('mouseup', function(e) {
+      findxy('up', e);
+    }, false);
+    // when the mouse moves over the canvas
+    canvas.addEventListener('mousemove', function(e) {
+      if (paint) { // if it is down: call findxy and set drag to true
+        isDrag = true;
+        findxy('move', e);
+      } // otherwise, update drag to false
+      isDrag = false;
+    }, false);
+
+    // when the 'clear' button is clicked in this window, call the clear function.
+    clearButton.addEventListener('click', function(e) {
+      clear(true);
+    });
+    // when the ERASER button is clicked, set the color to white.
+    white.addEventListener('click', function(obj) {
+      color(white);
+    }, false);
+    // when the RED color button is clicked, set the pen color to red.
+    red.addEventListener('click', function(obj) {
+      color(red);
+    }, false);
+    // when the BLUE color button is clicked, set the pen color to blue.
+    blue.addEventListener('click', function(obj) {
+      color(blue)
+    }, false);
+    // when the BLACK color button is clicked, set the pen color to black.
+    black.addEventListener('click', function(obj) {
+      color(black)
+    }, false);
+    // when the GREEN color button is clicked, set the pen color to green.
+    green.addEventListener('click', function(obj) {
+      color(green)
+    }, false);
+    // when the ORANGE color button is clicked, set the pen color to orange.
+    orange.addEventListener('click', function(obj) {
+      color(orange)
+    }, false);
+    // when the YELLOW color button is clicked, set the pen color to yellow.
+    yellow.addEventListener('click', function(obj) {
+      color(yellow)
+    }, false);
+    // when the original color button is clicked, the pen color is reverted to the original color.
+    initColor.addEventListener('click', function(obj) {
+      color(initColor);
+    }, false);
+
+    // initialize the socket
+    socket = io.connect(base + roomName);
+    /**
+     * These are the events that the websocket server will emit
+     *
+     * When sending messages, make sure the type is set to 'message', or other clients won't receive your data
+     * (e.g. socket.emit('message', { ... }); )
+     */
+    socket.on('welcome', function() {
+      // Connection is established, start using the socket
+      if (!haveConnected) {
+        haveConnected = true; // don't send info multiple times
+        username = currColor; // set username to be the random color assignment
+        socket.emit('message', { // tell the other sockets you're here
+          'msgType': 'new user',
+          'user': username
+        });
+      }
+    });
+
+    socket.on('message', function(data) {
+      // The 'message' event is emitted whenever another client sends a message
+      // Messages are automatically broadcasted to everyone in the room
+      try {
+        var msgType = data['msgType']; // all messages should have the property 'msgType'
+
+        if (data['msgType'] == 'draw') {
+          // another user is drawing on the canvas
+          draw(data['xSrc'], data['ySrc'], data['xDst'], data['yDst'], data['color'], data['width'], data['drag'], false);
+
+        } else if (msgType == 'new user') {
+          // a new user has entered
+          var usr = data['user']; // get user info
+          currUsers.push(usr); // push user to user list
+
+          socket.emit('message', {
+            'msgType': 'refresh',
+            'user': username,
+            'color': currColor,
+            'xMoves': xLog,
+            'yMoves': yLog,
+            'dragMoves': isDragging,
+            'colorMoves': colorLog,
+            'widthMoves': widthLog
+          });
+        } else if (msgType == 'alive') {
+          // do nothing
+        } else if (msgType == 'refresh') {
+          // another new user has entered and everyone else is broadcasting relevent info
+          var user = data['user'];
+          // check userList
+          if (jQuery.inArray(user, currUsers) != 0) {
+            // if this user is not in your user list, (new users) updated your canvas elements
+            currUsers.push(user); // update current user log
+            xLog = data['xMoves']; // update x moves
+            yLog = data['yMoves']; // update y moves
+            isDragging = data['dragMoves']; // update dragging moves
+            colorLog = data['colorMoves']; // update color for each move
+            widthLog = data['widthMoves']; // update width for each move
+            redraw(); // redraw with every update?
+          }
+        } else if (msgType == 'clear') {
+          // another user has cleared the canvas
+          clear(false);
+        }
+      } catch (err) {
+        console.log("socket message error: " + err.message);
+      }
+    });
+
+    socket.on('heartbeat', function() {
+      // You can listen on this event to make sure your connection is receiving events correctly
+      // The server will emit a heartbeat every 30 seconds to all connected clients
+
+      // let the server know you're still here
+      socket.emit('message', {
+        'msgType': 'alive'
+      });
+
+    });
+
+    socket.on('error', function(err) {
+      // Sometimes things go wrong!
+      var type = err.type; // This is the type of error that occurred
+      var message = err.message; // This is a friendly message that should describe the error
+      console.log('(Error) ' + type + ': ' + message);
+    });
+  });
+
+  function findxy(res, e) {
+    if (res == 'down') {
+      // the mouse has been put down on the canvas - no move has occurred
+      paint = true; // update paint variable
+      lastOut = false;
+      currX = e.clientX - $('canvas').offset().left;
+      currY = e.clientY - $('canvas').offset().top;
+      prevX = currX;
+      prevY = currY;
+      // add the click information to the log arrays
+      addClick(currX, currY, isDrag, currColor, currWidth);
+      // draw the click on the can
+      draw(prevX, prevY, currX, currY, currColor, currWidth, isDrag, true);
+    } else if (res == 'up' || res == "out") {
+      // the mouse has left the canvas or been lifted up
+      paint = false;
+      isDrag = false;
+      if (res == "out") lastOut = true;
+    } else if (res == 'move') {
+      // the mouse has been moved over the canvas
+      if (paint) {
+        // if the mouse is down, we are painting
+        prevX = currX;
+        prevY = currY;
+        currX = e.clientX - $('canvas').offset().left;
+        currY = e.clientY - $('canvas').offset().top;
+        // add drawing info to arrays
+        addClick(currX, currY, isDrag, currColor, currWidth);
+        // draw
+        draw(prevX, prevY, currX, currY, currColor, currWidth, isDrag, true);
+      }
+    } else if (res == 'over' && lastOut) {
+
+    }
+  }
+
+  function draw(xSrc, ySrc, xDst, yDst, color, width, drag, isOriginal) {
+    if (isOriginal) {
+      // if this drawing info originated in this socket, tell the other sockets before you draw
+      socket.emit('message', {
+        'msgType': 'draw',
+        'xSrc': xSrc,
+        'ySrc': ySrc,
+        'xDst': xDst,
+        'yDst': yDst,
+        'color': currColor,
+        'width': currWidth,
+        'drag': drag
+      });
+    } else if (!isOriginal) {
+      addClick(xSrc, ySrc, drag, color, width);
+      addClick(xDst, yDst, drag, color, width); // end at Dst
+    }
+    // draw
+    context.beginPath();
+    if (xSrc == xDst && ySrc == yDst) {
+      // this drawing was only a click
+      context.moveTo(xSrc - 1, ySrc);
+    } else {
+      // this was a full drawing
+      context.moveTo(xSrc, ySrc);
+    }
+    context.lineTo(xDst, yDst);
+    context.strokeStyle = color;
+    context.lineWidth = width;
+    context.stroke();
+    context.closePath();
+  }
+
+  function redraw() {
+    // draw the info received from the other users onto this canvas
+    for (var i = 0; i < xLog.length; i++) {
+      context.beginPath();
+      if (isDragging[i] && i) {
+        context.moveTo(xLog[i - 1], yLog[i - 1]);
+      } else {
+        context.moveTo(xLog[i] - 1, yLog[i]);
+      }
+      context.lineTo(xLog[i], yLog[i]);
+      context.strokeStyle = colorLog[i];
+      context.lineWidth = widthLog[i];
+      context.stroke();
+      context.closePath();
+    }
+  }
+
+  // add click to the arrays that log x,y-coordinates, dr
+  function addClick(xMove, yMove, dragging, curColor, curWidth) {
+    if (xLog[xLog.length - 1] != xMove && yLog[yLog.length - 1] != yMove) {
+      xLog.push(xMove);
+      yLog.push(yMove);
+      isDragging.push(dragging);
+      colorLog.push(curColor);
+      widthLog.push(curWidth);
+    }
+  }
+
+  function clear(isOriginal) {
+    if (isOriginal) {
+      // the clear button was clicked by this socket, so tell the others
+      socket.emit('message', {
+        'msgType': 'clear'
+      });
+    }
+    // reset the canvas drawing information -- there is no longer a drawing
+    xLog.length = 0;
+    yLog.length = 0;
+    isDragging.length = 0;
+    colorLog.length = 0;
+    widthLog.length = 0;
+    // clear the canvas
+    context.clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  function color(obj) {
+    switch (obj.id) {
+      case "green":
+        currColor = "green";
+        break;
+
+      case "blue":
+        currColor = "blue";
+        break;
+
+      case "red":
+        currColor = "red";
+        break;
+
+      case "yellow":
+        currColor = "yellow";
+        break;
+
+      case "orange":
+        currColor = "orange";
+        break;
+
+      case "black":
+        currColor = "black";
+        break;
+
+      case "white":
+        currColor = "white";
+        break;
+      case "initColor":
+        currColor = initialColor;
+        break;
+    }
+    if (currColor == "white") currWidth = 14;
+    else currWidth = 2;
+  }
+  
+
+
+  </script>
+</body>
+</html>
